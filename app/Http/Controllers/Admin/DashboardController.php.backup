@@ -1,0 +1,183 @@
+<?php
+
+namespace App\Http\Controllers\Admin;
+
+use App\Http\Controllers\Controller;
+use App\Models\History;
+use App\Models\Kerusakan;
+use App\Models\Gejala;
+use App\Models\User;
+use App\Models\BasisPengetahuan;
+use Illuminate\Http\Request;
+use Carbon\Carbon;
+
+class DashboardController extends Controller
+{
+    /**
+     * Display admin dashboard
+     */
+    public function index()
+    {
+        // Basic Statistics
+        $totalDiagnosa = History::count();
+        $totalUser = User::where('role', 'user')->count();
+        $totalGejala = Gejala::count();
+        $totalKerusakan = Kerusakan::count();
+        $totalRules = BasisPengetahuan::count();
+
+        // Today's statistics
+        $diagnosaHariIni = History::whereDate('created_at', today())->count();
+        $userBaruHariIni = User::where('role', 'user')
+            ->whereDate('created_at', today())
+            ->count();
+
+        // Weekly statistics
+        $diagnosaMingguIni = History::whereBetween('created_at', [
+            now()->startOfWeek(),
+            now()->endOfWeek()
+        ])->count();
+
+        // Recent data
+        $diagnosaTerbaru = History::with('user')
+            ->latest()
+            ->take(5)
+            ->get();
+
+        $userTerbaru = User::where('role', 'user')
+            ->latest()
+            ->take(5)
+            ->get();
+
+        // Statistics for charts
+        $statistikKerusakan = History::selectRaw('hasil_akhir, COUNT(*) as total')
+            ->whereNotNull('hasil_akhir')
+            ->where('hasil_akhir', '!=', 'Tidak dapat didiagnosa')
+            ->groupBy('hasil_akhir')
+            ->orderBy('total', 'DESC')
+            ->take(5)
+            ->get();
+
+        // Monthly statistics for chart
+        $monthlyDiagnosa = $this->getMonthlyDiagnosa();
+
+        // System health
+        $gejalaAktif = Gejala::aktif()->count();
+        $rulesAktif = BasisPengetahuan::aktif()->count();
+        $gejalaTanpaRules = $this->getGejalaTanpaRules();
+
+        return view('admin.dashboard', compact(
+            'totalDiagnosa',
+            'totalUser', 
+            'totalGejala',
+            'totalKerusakan',
+            'totalRules',
+            'diagnosaHariIni',
+            'userBaruHariIni',
+            'diagnosaMingguIni',
+            'diagnosaTerbaru',
+            'userTerbaru',
+            'statistikKerusakan',
+            'monthlyDiagnosa',
+            'gejalaAktif',
+            'rulesAktif',
+            'gejalaTanpaRules'
+        ));
+    }
+
+    /**
+     * Get monthly diagnosa data for chart
+     */
+    private function getMonthlyDiagnosa()
+    {
+        $currentYear = now()->year;
+        
+        $monthlyData = History::selectRaw('MONTH(created_at) as month, COUNT(*) as total')
+            ->whereYear('created_at', $currentYear)
+            ->groupBy('month')
+            ->orderBy('month')
+            ->get();
+
+        // Fill missing months with zero
+        $allMonths = collect(range(1, 12))->mapWithKeys(function ($month) use ($monthlyData) {
+            $data = $monthlyData->firstWhere('month', $month);
+            return [$month => $data ? $data->total : 0];
+        });
+
+        return $allMonths;
+    }
+
+    /**
+     * Get gejala without rules
+     */
+    private function getGejalaTanpaRules()
+    {
+        return Gejala::aktif()
+            ->whereDoesntHave('basisPengetahuan')
+            ->count();
+    }
+
+    /**
+     * Get quick stats (API)
+     */
+    public function getQuickStats()
+    {
+        $stats = [
+            'total_diagnosa' => History::count(),
+            'diagnosa_hari_ini' => History::whereDate('created_at', today())->count(),
+            'total_user' => User::where('role', 'user')->count(),
+            'user_baru_hari_ini' => User::where('role', 'user')
+                ->whereDate('created_at', today())
+                ->count(),
+            'total_gejala' => Gejala::count(),
+            'gejala_aktif' => Gejala::aktif()->count(),
+            'total_kerusakan' => Kerusakan::count(),
+            'total_rules' => BasisPengetahuan::count(),
+            'rules_aktif' => BasisPengetahuan::aktif()->count(),
+        ];
+
+        return response()->json($stats);
+    }
+
+    /**
+     * Get recent activities (API)
+     */
+    public function getRecentActivities()
+    {
+        $recentDiagnosa = History::with('user')
+            ->latest()
+            ->take(10)
+            ->get()
+            ->map(function ($history) {
+                return [
+                    'type' => 'diagnosa',
+                    'user' => $history->user->name,
+                    'action' => 'melakukan diagnosa',
+                    'result' => $history->hasil_akhir,
+                    'time' => $history->created_at->diffForHumans(),
+                    'icon' => 'fas fa-stethoscope'
+                ];
+            });
+
+        $recentUsers = User::where('role', 'user')
+            ->latest()
+            ->take(5)
+            ->get()
+            ->map(function ($user) {
+                return [
+                    'type' => 'user',
+                    'user' => $user->name,
+                    'action' => 'bergabung',
+                    'result' => 'User baru',
+                    'time' => $user->created_at->diffForHumans(),
+                    'icon' => 'fas fa-user-plus'
+                ];
+            });
+
+        $activities = $recentDiagnosa->merge($recentUsers)
+            ->sortByDesc('time')
+            ->take(10)
+            ->values();
+
+        return response()->json($activities);
+    }
+}
