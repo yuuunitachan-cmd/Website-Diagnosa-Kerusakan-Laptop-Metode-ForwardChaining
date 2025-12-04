@@ -78,14 +78,6 @@
                 </button>
             </form>
 
-            <!-- Demo Accounts -->
-            <div class="mt-6 p-4 bg-gray-50 rounded-lg">
-                <h3 class="text-sm font-medium text-gray-700 mb-2">Akun Demo:</h3>
-                <div class="space-y-1 text-xs text-gray-600">
-                    <p><strong>Admin:</strong> admin@diagnosa.com / password</p>
-                    <p><strong>User:</strong> user@diagnosa.com / password</p>
-                </div>
-            </div>
 
             <!-- Register Link -->
             <div class="mt-6 text-center">
